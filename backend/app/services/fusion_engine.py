@@ -111,6 +111,7 @@ def get_device_health_factor(db: Session, device_id: str | None) -> float:
         return 1.0
 
     factor = 1.0
+    battery = max(0, min(100, device.battery_level))  # clamp bad sensor readings
     if device.battery_level < 20:
         factor *= 0.6  # low battery: sensor readings less reliable
     elif device.battery_level < 40:
