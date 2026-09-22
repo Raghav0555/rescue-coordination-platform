@@ -56,4 +56,4 @@ def report_summary_csv(db: Session = Depends(get_db)):
         output,
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=rescue_operation_report.csv"},
-    )
+    ) 
