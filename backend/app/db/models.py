@@ -95,6 +95,8 @@ class SurvivorZone(Base):
     evidence_items = relationship("Evidence", back_populates="zone")
     tasks = relationship("Task", back_populates="zone")
     alerts = relationship("Alert", back_populates="zone")
+    def __repr__(self):
+        return f"<SurvivorZone {self.id} score={self.confidence_score}>"
 
 
 class Task(Base):
