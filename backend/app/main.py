@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.database import engine, Base
-from app.routers import auth, evidence, teams, tasks, alerts
+from app.routers import auth, evidence, teams, tasks, alerts, devices, reports
 
 # Creates all tables on startup (fine for a prototype; use Alembic migrations
 # for anything beyond this, as noted in the SRS Section 7).

@@ -120,3 +120,18 @@ class Alert(Base):
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
 
     zone = relationship("SurvivorZone", back_populates="alerts")
+
+
+class Device(Base):
+    """
+    Implements the Data Dictionary's Device entity (SRS Section 7).
+    Tracked separately from Evidence.source_device_id so the Fusion Engine
+    can look up a device's current health when weighting its evidence
+    (FR-3.5), rather than trusting every submission equally.
+    """
+    __tablename__ = "devices"
+    id = Column(String, primary_key=True)  # matches Evidence.source_device_id, e.g. "drone-1"
+    type = Column(String, default="MobileApp")  # ESP32Node | RaspberryPiNode | DroneSensor | MobileApp
+    battery_level = Column(Integer, default=100)  # 0-100
+    last_calibration = Column(DateTime, default=datetime.datetime.utcnow)
+    last_seen = Column(DateTime, default=datetime.datetime.utcnow)

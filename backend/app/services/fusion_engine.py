@@ -67,26 +67,60 @@ def get_recent_evidence_for_zone(db: Session, zone_id: str):
     )
 
 
-def calculate_confidence(evidence_list) -> int:
+def calculate_confidence(db: Session, evidence_list) -> int:
     """
     FR-3.3: weighted fusion of evidence types into a 0-100 confidence score.
-    Diminishing returns are applied so 3 thermal readings don't just triple-count.
+    FR-3.5: each evidence item's contribution is scaled by its source
+    device's health — a low-battery or long-uncalibrated device counts
+    for less, since its readings are less trustworthy.
+    Diminishing returns are still applied per type so repeated readings
+    from the same type don't just triple-count.
     """
     if not evidence_list:
         return 0
 
-    type_counts = {}
+    type_scores = {}
     for ev in evidence_list:
-        type_counts[ev.type] = type_counts.get(ev.type, 0) + 1
+        base_weight = EVIDENCE_WEIGHTS.get(ev.type, 10)
+        health_factor = get_device_health_factor(db, ev.source_device_id)
+        weighted = base_weight * health_factor
+        if ev.type not in type_scores:
+            type_scores[ev.type] = []
+        type_scores[ev.type].append(weighted)
 
     score = 0
-    for ev_type, count in type_counts.items():
-        base_weight = EVIDENCE_WEIGHTS.get(ev_type, 10)
-        # diminishing returns: 1st reading full weight, each additional +30%
-        score += base_weight + (count - 1) * (base_weight * 0.3)
+    for ev_type, weights in type_scores.items():
+        weights.sort(reverse=True)
+        # first (strongest) reading counts fully, each additional +30%
+        score += weights[0] + sum(w * 0.3 for w in weights[1:])
 
     return min(int(round(score)), 100)
 
+
+def get_device_health_factor(db: Session, device_id: str | None) -> float:
+    """
+    FR-3.5: returns a 0.0–1.0 multiplier based on device health.
+    Unknown/unregistered devices are treated as fully trusted (1.0) —
+    we only discount evidence when we have a reason to distrust it.
+    """
+    if not device_id:
+        return 1.0
+
+    device = db.query(models.Device).filter(models.Device.id == device_id).first()
+    if not device:
+        return 1.0
+
+    factor = 1.0
+    if device.battery_level < 20:
+        factor *= 0.6  # low battery: sensor readings less reliable
+    elif device.battery_level < 40:
+        factor *= 0.85
+
+    days_since_calibration = (datetime.datetime.utcnow() - device.last_calibration).days
+    if days_since_calibration > 30:
+        factor *= 0.8  # stale calibration: trust it a bit less
+
+    return round(factor, 2)
 
 def fuse_evidence(db: Session, evidence: models.Evidence) -> models.SurvivorZone:
     """
@@ -98,7 +132,7 @@ def fuse_evidence(db: Session, evidence: models.Evidence) -> models.SurvivorZone
     db.commit()
 
     recent_evidence = get_recent_evidence_for_zone(db, zone.id)
-    new_score = calculate_confidence(recent_evidence)
+    new_score = calculate_confidence(db, recent_evidence)
 
     zone.confidence_score = new_score
     zone.last_updated = datetime.datetime.utcnow()
