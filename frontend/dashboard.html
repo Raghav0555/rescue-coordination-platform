@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Control Room Dashboard — Rescue Coordination Platform</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; background: #0f1720; color: #e6edf3; }
+  header { background: #16212b; padding: 14px 24px; border-bottom: 1px solid #263340; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .status { font-size: 12px; color: #7ee787; }
+  .layout { display: grid; grid-template-columns: 1fr 340px; height: calc(100vh - 56px); }
+  #map { height: 100%; }
+  .sidebar { background: #16212b; border-left: 1px solid #263340; overflow-y: auto; padding: 16px; }
+  .panel { margin-bottom: 24px; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: #8b98a5; margin-bottom: 10px; }
+  .card { background: #1c2733; border: 1px solid #263340; border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; font-size: 13px; }
+  .card.alert-high { border-left: 3px solid #f0883e; }
+  .card.alert-critical { border-left: 3px solid #f85149; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge.high { background: #3d2817; color: #f0883e; }
+  .badge.critical { background: #3d1418; color: #f85149; }
+  .badge.unsearched { background: #24304a; color: #79c0ff; }
+  .badge.assigned { background: #2d2417; color: #d29922; }
+  .badge.searched { background: #1a2e1a; color: #56d364; }
+  .score { font-weight: 700; font-size: 16px; }
+  button { background: #238636; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  button:hover { background: #2ea043; }
+  button.secondary { background: #30363d; }
+  button.secondary:hover { background: #3a424b; }
+  .refresh-note { font-size: 11px; color: #6e7681; margin-top: 4px; }
+  select, input { background: #0f1720; border: 1px solid #263340; color: #e6edf3; padding: 4px 6px; border-radius: 4px; font-size: 12px; width: 100%; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Rescue Evidence Fusion &amp; Coordination Platform — Control Room</h1>
+  <span class="status" id="conn-status">● connecting...</span>
+</header>
+
+<div style="background:#16212b;padding:8px 24px;border-bottom:1px solid #263340;display:flex;align-items:center;gap:8px;">
+  <label style="font-size:12px;color:#8b98a5;">Backend API URL:</label>
+  <input id="api-url-input" style="flex:1;max-width:320px;background:#0f1720;border:1px solid #263340;color:#e6edf3;padding:5px 8px;border-radius:4px;font-size:12px;font-family:monospace;" />
+  <button onclick="saveApiUrl()" class="secondary" style="padding:5px 10px;">Save</button>
+</div>
+
+<div class="layout">
+  <div id="map"></div>
+  <div class="sidebar">
+    <div class="panel">
+      <h2>Active Alerts</h2>
+      <div id="alerts-list"><p style="color:#6e7681;font-size:12px;">No alerts yet.</p></div>
+    </div>
+
+    <div class="panel">
+      <h2>Survivor Zones</h2>
+      <div id="zones-list"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Assign Task</h2>
+      <select id="zone-select"></select>
+      <select id="team-select"></select>
+      <select id="priority-select">
+        <option>Low</option><option>Medium</option><option selected>High</option><option>Critical</option>
+      </select>
+      <button onclick="assignTask()" style="width:100%;">Assign Nearest Team</button>
+    </div>
+
+    <div class="panel">
+      <h2>Create Team (demo)</h2>
+      <input id="new-team-name" placeholder="Team name e.g. Alpha Squad" />
+      <button onclick="createTeam()" class="secondary" style="width:100%;">Create Team</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let API = localStorage.getItem('rescueApiUrl') || "http://localhost:8000/api";
+document.getElementById('api-url-input').value = API;
+
+function saveApiUrl() {
+  const val = document.getElementById('api-url-input').value.trim().replace(/\/$/, '');
+  API = val;
+  localStorage.setItem('rescueApiUrl', val);
+  refreshAll();
+}
+
+const map = L.map('map').setView([19.0760, 72.8777], 13); // default Mumbai-ish view
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+
+let zoneMarkers = {};
+let teamMarkers = {};
+let mapHasBeenFitOnce = false;
+
+function colorForScore(score) {
+  if (score >= 90) return '#f85149';
+  if (score >= 75) return '#f0883e';
+  if (score >= 40) return '#d29922';
+  return '#58a6ff';
+}
+
+async function refreshAll() {
+  try {
+    const [zones, alerts, teams] = await Promise.all([
+      fetch(`${API}/evidence/zones`).then(r => r.json()),
+      fetch(`${API}/alerts/`).then(r => r.json()),
+      fetch(`${API}/teams/`).then(r => r.json()),
+    ]);
+    document.getElementById('conn-status').textContent = '● live';
+    document.getElementById('conn-status').style.color = '#7ee787';
+    renderZones(zones);
+    renderAlerts(alerts);
+    renderTeams(teams);
+    populateSelects(zones, teams);
+  } catch (e) {
+    document.getElementById('conn-status').textContent = '● backend not reachable';
+    document.getElementById('conn-status').style.color = '#f85149';
+  }
+}
+
+function renderZones(zones) {
+  const list = document.getElementById('zones-list');
+  list.innerHTML = zones.length ? '' : '<p style="color:#6e7681;font-size:12px;">No zones yet — submit evidence from the field app.</p>';
+
+  const seen = new Set();
+  const allPoints = [];
+  zones.forEach(z => {
+    seen.add(z.id);
+    allPoints.push([z.lat, z.lng]);
+    if (zoneMarkers[z.id]) {
+      zoneMarkers[z.id].setStyle({ fillColor: colorForScore(z.confidence_score), color: colorForScore(z.confidence_score) });
+      zoneMarkers[z.id].setRadius(30 + z.confidence_score);
+    } else {
+      zoneMarkers[z.id] = L.circle([z.lat, z.lng], {
+        radius: 30 + z.confidence_score,
+        color: colorForScore(z.confidence_score),
+        fillColor: colorForScore(z.confidence_score),
+        fillOpacity: 0.35,
+      }).addTo(map).bindPopup(`Zone ${z.id}<br/>Confidence: ${z.confidence_score}`);
+    }
+
+    const badgeClass = z.status.toLowerCase();
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span>Zone <code>${z.id}</code></span>
+        <span class="badge ${badgeClass}">${z.status}</span>
+      </div>
+      <div class="score" style="color:${colorForScore(z.confidence_score)}">${z.confidence_score}% confidence</div>
+    `;
+    list.appendChild(card);
+  });
+
+  Object.keys(zoneMarkers).forEach(id => {
+    if (!seen.has(id)) { map.removeLayer(zoneMarkers[id]); delete zoneMarkers[id]; }
+  });
+
+  // Auto-fit the map so zones are always actually visible, instead of
+  // staying on the hardcoded default view regardless of where evidence
+  // is actually coming from.
+  if (allPoints.length > 0 && !mapHasBeenFitOnce) {
+    map.fitBounds(allPoints, { padding: [60, 60], maxZoom: 16 });
+    mapHasBeenFitOnce = true;
+  } else if (allPoints.length > 0) {
+    // Keep expanding bounds as new zones appear, without yanking the view
+    // around every single refresh if the user has manually panned/zoomed.
+    const currentBounds = map.getBounds();
+    const newPoint = allPoints[allPoints.length - 1];
+    if (!currentBounds.contains(newPoint)) {
+      map.fitBounds([...allPoints], { padding: [60, 60], maxZoom: 16 });
+    }
+  }
+}
+
+function renderAlerts(alerts) {
+  const list = document.getElementById('alerts-list');
+  const active = alerts.filter(a => !a.acknowledged);
+  list.innerHTML = active.length ? '' : '<p style="color:#6e7681;font-size:12px;">No active alerts.</p>';
+  active.forEach(a => {
+    const card = document.createElement('div');
+    card.className = `card alert-${a.priority.toLowerCase()}`;
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="badge ${a.priority.toLowerCase()}">${a.priority}</span>
+        <button onclick="ackAlert('${a.id}')">Acknowledge</button>
+      </div>
+      <div style="margin-top:6px;">Zone <code>${a.zone_id}</code> — score ${a.trigger_score}</div>
+    `;
+    list.appendChild(card);
+  });
+}
+
+function renderTeams(teams) {
+  teams.forEach(t => {
+    if (t.current_lat && t.current_lng) {
+      if (teamMarkers[t.id]) {
+        teamMarkers[t.id].setLatLng([t.current_lat, t.current_lng]);
+      } else {
+        teamMarkers[t.id] = L.marker([t.current_lat, t.current_lng]).addTo(map).bindPopup(t.team_name);
+      }
+    }
+  });
+}
+
+function populateSelects(zones, teams) {
+  const zoneSel = document.getElementById('zone-select');
+  const teamSel = document.getElementById('team-select');
+  zoneSel.innerHTML = zones.map(z => `<option value="${z.id}">Zone ${z.id} (${z.confidence_score}%)</option>`).join('');
+  teamSel.innerHTML = teams.map(t => `<option value="${t.id}">${t.team_name}</option>`).join('');
+}
+
+async function assignTask() {
+  const zone_id = document.getElementById('zone-select').value;
+  const team_id = document.getElementById('team-select').value;
+  const priority = document.getElementById('priority-select').value;
+  if (!zone_id || !team_id) { alert('Create a zone (submit evidence) and a team first.'); return; }
+
+  const res = await fetch(`${API}/tasks/`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ zone_id, team_id, priority })
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    alert('Could not assign: ' + err.detail);
+  }
+  refreshAll();
+}
+
+async function ackAlert(id) {
+  await fetch(`${API}/alerts/${id}/acknowledge`, { method: 'PATCH' });
+  refreshAll();
+}
+
+async function createTeam() {
+  const name = document.getElementById('new-team-name').value.trim();
+  if (!name) return;
+  await fetch(`${API}/teams/`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ team_name: name })
+  });
+  document.getElementById('new-team-name').value = '';
+  refreshAll();
+}
+
+refreshAll();
+setInterval(refreshAll, 5000); // poll every 5s — swap for WebSocket in the full build
+</script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Field App — Submit Evidence</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; background: #0f1720; color: #e6edf3; max-width: 420px; margin: 0 auto; min-height: 100vh; }
+  header { background: #16212b; padding: 16px; text-align: center; border-bottom: 1px solid #263340; }
+  header h1 { font-size: 16px; margin: 0; }
+  .content { padding: 16px; }
+  .type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+  .type-btn { background: #1c2733; border: 2px solid #263340; border-radius: 10px; padding: 18px 8px; text-align: center; cursor: pointer; font-size: 14px; }
+  .type-btn.selected { border-color: #238636; background: #16261c; }
+  .type-btn .icon { font-size: 28px; display: block; margin-bottom: 6px; }
+  .location-box { background: #1c2733; border-radius: 8px; padding: 12px; margin-bottom: 16px; font-size: 13px; }
+  .location-box .coords { color: #79c0ff; font-family: monospace; margin-top: 4px; }
+  button.submit { width: 100%; background: #238636; color: white; border: none; padding: 16px; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
+  button.submit:active { background: #2ea043; }
+  button.submit:disabled { background: #30363d; cursor: not-allowed; }
+  .queue-note { text-align: center; font-size: 12px; color: #d29922; margin-top: 10px; display: none; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #238636; color: white; padding: 10px 20px; border-radius: 20px; font-size: 13px; opacity: 0; transition: opacity 0.3s; }
+  .toast.show { opacity: 1; }
+  select { width: 100%; background: #1c2733; border: 1px solid #263340; color: #e6edf3; padding: 10px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+  .queued-count { text-align:center; font-size: 12px; color: #8b98a5; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header><h1>🚨 Field Evidence Submission</h1></header>
+
+<div class="content">
+  <div style="background:#1c2733;border:1px solid #263340;border-radius:8px;padding:10px 12px;margin-bottom:16px;">
+    <label style="font-size:11px;color:#8b98a5;">Backend API URL</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <input id="api-url-input" style="flex:1;background:#0f1720;border:1px solid #263340;color:#e6edf3;padding:8px;border-radius:6px;font-size:12px;font-family:monospace;" placeholder="http://192.168.x.x:8000/api" />
+      <button onclick="saveApiUrl()" style="background:#30363d;color:#e6edf3;border:none;padding:8px 12px;border-radius:6px;font-size:12px;">Save</button>
+    </div>
+  </div>
+
+  <label style="font-size:12px;color:#8b98a5;">Who's submitting?</label>
+  <select id="actor-select">
+    <option value="drone-1">Drone Operator (drone-1)</option>
+    <option value="responder-1">Field Responder (responder-1)</option>
+    <option value="sensor-1">Sensor Operator (sensor-1)</option>
+    <option value="dog-1">Search Dog Handler (dog-1)</option>
+  </select>
+
+  <label style="font-size:12px;color:#8b98a5;">Evidence type</label>
+  <div class="type-grid" id="type-grid">
+    <div class="type-btn" data-type="Thermal"><span class="icon">🌡️</span>Thermal</div>
+    <div class="type-btn" data-type="Audio"><span class="icon">🎙️</span>Audio</div>
+    <div class="type-btn" data-type="Visual"><span class="icon">📷</span>Visual</div>
+    <div class="type-btn" data-type="Sensor"><span class="icon">📡</span>Sensor</div>
+    <div class="type-btn" data-type="GPS"><span class="icon">📍</span>GPS Ping</div>
+  </div>
+
+  <div class="location-box">
+    Location
+    <div class="coords" id="coords">19.0522, 73.0219</div>
+    <button onclick="useRealGPS()" style="margin-top:8px;background:#238636;color:white;border:none;padding:6px 10px;border-radius:6px;font-size:12px;">📍 Use my real GPS location</button>
+    <button onclick="jitterLocation()" style="margin-top:8px;background:#30363d;color:#e6edf3;border:none;padding:6px 10px;border-radius:6px;font-size:12px;">🎲 Simulate GPS (fake, for testing)</button>
+    <div id="gps-status" style="font-size:11px;color:#8b98a5;margin-top:6px;"></div>
+  </div>
+
+  <button class="submit" id="submit-btn" onclick="submitEvidence()" disabled>Select evidence type first</button>
+  <div class="queue-note" id="queue-note">⚠ Offline — evidence queued locally, will sync automatically</div>
+  <div class="queued-count" id="queued-count"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let API = localStorage.getItem('rescueApiUrl') || "http://localhost:8000/api";
+document.getElementById('api-url-input').value = API;
+
+function saveApiUrl() {
+  const val = document.getElementById('api-url-input').value.trim().replace(/\/$/, '');
+  API = val;
+  localStorage.setItem('rescueApiUrl', val);
+  showToast('✓ API URL saved');
+}
+
+let selectedType = null;
+let baseLat = 19.0522, baseLng = 73.0219;
+let curLat = baseLat, curLng = baseLng;
+
+document.querySelectorAll('.type-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    selectedType = btn.dataset.type;
+    document.getElementById('submit-btn').disabled = false;
+    document.getElementById('submit-btn').textContent = `Submit ${selectedType} Evidence`;
+  });
+});
+
+function jitterLocation() {
+  curLat = baseLat + (Math.random() - 0.5) * 0.0006;
+  curLng = baseLng + (Math.random() - 0.5) * 0.0006;
+  document.getElementById('coords').textContent = `${curLat.toFixed(5)}, ${curLng.toFixed(5)} (simulated)`;
+  document.getElementById('gps-status').textContent = '';
+}
+
+function useRealGPS() {
+  const statusEl = document.getElementById('gps-status');
+  if (!navigator.geolocation) {
+    statusEl.textContent = 'Geolocation not supported by this browser — using simulated location instead.';
+    jitterLocation();
+    return;
+  }
+  statusEl.textContent = 'Getting your location...';
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      curLat = pos.coords.latitude;
+      curLng = pos.coords.longitude;
+      document.getElementById('coords').textContent = `${curLat.toFixed(5)}, ${curLng.toFixed(5)} (real GPS, ±${Math.round(pos.coords.accuracy)}m)`;
+      statusEl.textContent = '';
+    },
+    (err) => {
+      statusEl.textContent = `Could not get location (${err.message}) — using simulated location instead.`;
+      jitterLocation();
+    },
+    { enableHighAccuracy: true, timeout: 8000 }
+  );
+}
+
+// Local offline queue (FR-2.5 / FR-7.1) — stored in memory for the prototype.
+let offlineQueue = [];
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+async function submitEvidence() {
+  const payload = {
+    type: selectedType,
+    lat: curLat,
+    lng: curLng,
+    source_device_id: document.getElementById('actor-select').value,
+  };
+
+  try {
+    const res = await fetch(`${API}/evidence/`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error('submit failed');
+    showToast('✓ Evidence submitted and fused');
+    await trySyncQueue();
+  } catch (e) {
+    // FR-2.5: queue locally when connectivity/backend is unavailable
+    offlineQueue.push(payload);
+    document.getElementById('queue-note').style.display = 'block';
+    updateQueueCount();
+    showToast('⚠ Saved offline — will sync later');
+  }
+}
+
+async function trySyncQueue() {
+  if (offlineQueue.length === 0) return;
+  const remaining = [];
+  for (const item of offlineQueue) {
+    try {
+      const res = await fetch(`${API}/evidence/`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item)
+      });
+      if (!res.ok) remaining.push(item);
+    } catch (e) {
+      remaining.push(item);
+    }
+  }
+  offlineQueue = remaining;
+  updateQueueCount();
+  if (offlineQueue.length === 0) document.getElementById('queue-note').style.display = 'none';
+}
+
+function updateQueueCount() {
+  document.getElementById('queued-count').textContent =
+    offlineQueue.length ? `${offlineQueue.length} item(s) pending sync` : '';
+}
+
+// Try syncing any queued items every 10s, simulating reconnection checks (FR-2.6)
+setInterval(trySyncQueue, 10000);
+</script>
+</body>
+</html>
