@@ -64,6 +64,7 @@ class Team(Base):
     current_lat = Column(Float, nullable=True)
     current_lng = Column(Float, nullable=True)
     status = Column(String, default="Available")  # Available | Assigned | Unavailable
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     members = relationship("User", back_populates="team")
     tasks = relationship("Task", back_populates="team")
