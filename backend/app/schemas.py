@@ -87,6 +87,7 @@ class TeamOut(BaseModel):
     current_lat: Optional[float]
     current_lng: Optional[float]
     status: str
+    created_at: datetime
 
     class Config:
         from_attributes = True
