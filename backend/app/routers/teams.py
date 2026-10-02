@@ -13,6 +13,8 @@ router = APIRouter(prefix="/api/teams", tags=["teams"])
 
 @router.post("/", response_model=schemas.TeamOut)
 def create_team(payload: schemas.TeamCreate, db: Session = Depends(get_db)):
+    if not payload.team_name.strip():
+        raise HTTPException(status_code=400, detail="Team name cannot be blank")
     team = models.Team(team_name=payload.team_name)
     db.add(team)
     db.commit()
