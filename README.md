@@ -42,6 +42,12 @@ Backend runs at `http://localhost:8000`. Interactive API docs (Swagger) at
 `http://localhost:8000/docs` — you can test every endpoint from there
 without touching the frontend at all.
 
+To run the backend tests (from `backend/`, with the venv active):
+
+```bash
+python -m unittest discover -v
+```
+
 ### 2. Frontend
 
 No build step — just open the HTML files directly in a browser:
