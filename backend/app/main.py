@@ -32,6 +32,7 @@ app.include_router(evidence.router)
 app.include_router(teams.router)
 app.include_router(tasks.router)
 app.include_router(alerts.router)
+app.include_router(devices.router)
 
 
 @app.get("/")
