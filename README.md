@@ -48,6 +48,16 @@ To run the backend tests (from `backend/`, with the venv active):
 python -m unittest discover -v
 ```
 
+Selenium UI tests only (needs Google Chrome; opens a browser window and
+starts its own backend + frontend server, so nothing else needs to be running):
+
+```bash
+python -m unittest test.test_selenium -v
+```
+
+Set `DEMO_DELAY=1` to slow each step down for a live demo, or `HEADLESS=1`
+to hide the browser.
+
 ### 2. Frontend
 
 No build step — just open the HTML files directly in a browser:

@@ -8,3 +8,5 @@ python-jose[cryptography]==3.3.0
 python-multipart==0.0.9
 # Required by fastapi.testclient.TestClient in backend/test
 httpx==0.28.1
+# Selenium UI tests (backend/test/test_selenium.py) — needs Google Chrome installed
+selenium==4.36.0

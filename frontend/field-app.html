@@ -20,7 +20,7 @@
   button.submit:active { background: #2ea043; }
   button.submit:disabled { background: #30363d; cursor: not-allowed; }
   .queue-note { text-align: center; font-size: 12px; color: #d29922; margin-top: 10px; display: none; }
-  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #238636; color: white; padding: 10px 20px; border-radius: 20px; font-size: 13px; opacity: 0; transition: opacity 0.3s; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #238636; color: white; padding: 10px 20px; border-radius: 20px; font-size: 13px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
   .toast.show { opacity: 1; }
   select { width: 100%; background: #1c2733; border: 1px solid #263340; color: #e6edf3; padding: 10px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
   .queued-count { text-align:center; font-size: 12px; color: #8b98a5; margin-top: 8px; }
@@ -128,11 +128,14 @@ function useRealGPS() {
 // Local offline queue (FR-2.5 / FR-7.1) — stored in memory for the prototype.
 let offlineQueue = [];
 
+let toastTimer = null;
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2500);
+  // Restart the timer so an older toast's timeout doesn't hide this one early
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
 }
 
 async function submitEvidence() {
