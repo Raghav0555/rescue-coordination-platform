@@ -46,6 +46,9 @@
     <option value="dog-1">Search Dog Handler (dog-1)</option>
   </select>
 
+  <label style="font-size:12px;color:#8b98a5;">Reporting team (optional, updates team position on the map)</label>
+  <select id="team-select"><option value="">— none —</option></select>
+
   <label style="font-size:12px;color:#8b98a5;">Evidence type</label>
   <div class="type-grid" id="type-grid">
     <div class="type-btn" data-type="Thermal"><span class="icon">🌡️</span>Thermal</div>
@@ -79,6 +82,7 @@ function saveApiUrl() {
   API = val;
   localStorage.setItem('rescueApiUrl', val);
   showToast('✓ API URL saved');
+  loadTeams();
 }
 
 let selectedType = null;
@@ -125,6 +129,17 @@ function useRealGPS() {
   );
 }
 
+async function loadTeams() {
+  try {
+    const teams = await fetch(`${API}/teams/`).then(r => r.json());
+    const sel = document.getElementById('team-select');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— none —</option>' + teams.map(t => `<option value="${t.id}">${t.team_name.replace(/[<>&"]/g, '')}</option>`).join('');
+    sel.value = cur;
+  } catch (e) { /* backend offline: keep the list as it is */ }
+}
+loadTeams();
+
 // Local offline queue (FR-2.5 / FR-7.1) — stored in memory for the prototype.
 let offlineQueue = [];
 
@@ -151,8 +166,20 @@ async function submitEvidence() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
+    if (res.status >= 400 && res.status < 500) {
+      const err = await res.json().catch(() => ({ detail: 'rejected' }));
+      showToast('✗ Rejected: ' + err.detail);
+      return;
+    }
     if (!res.ok) throw new Error('submit failed');
     showToast('✓ Evidence submitted and fused');
+    const team = document.getElementById('team-select').value;
+    if (team) {
+      fetch(`${API}/teams/${team}/location`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat: curLat, lng: curLng })
+      }).catch(() => {});
+    }
     await trySyncQueue();
   } catch (e) {
     // FR-2.5: queue locally when connectivity/backend is unavailable
@@ -172,7 +199,7 @@ async function trySyncQueue() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
       });
-      if (!res.ok) remaining.push(item);
+      if (res.status >= 500) remaining.push(item);  // 4xx will never succeed, so drop it
     } catch (e) {
       remaining.push(item);
     }
@@ -189,6 +216,7 @@ function updateQueueCount() {
 
 // Try syncing any queued items every 10s, simulating reconnection checks (FR-2.6)
 setInterval(trySyncQueue, 10000);
+window.addEventListener('online', trySyncQueue);
 </script>
 </body>
 </html>

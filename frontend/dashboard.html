@@ -7,11 +7,11 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
 <style>
   * { box-sizing: border-box; }
-  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; background: #0f1720; color: #e6edf3; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; background: #0f1720; color: #e6edf3; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
   header { background: #16212b; padding: 14px 24px; border-bottom: 1px solid #263340; display: flex; justify-content: space-between; align-items: center; }
   header h1 { font-size: 18px; margin: 0; }
   header .status { font-size: 12px; color: #7ee787; }
-  .layout { display: grid; grid-template-columns: 1fr 340px; height: calc(100vh - 56px); }
+  .layout { display: grid; grid-template-columns: 1fr 340px; flex: 1; min-height: 0; }
   #map { height: 100%; }
   .sidebar { background: #16212b; border-left: 1px solid #263340; overflow-y: auto; padding: 16px; }
   .panel { margin-bottom: 24px; }
@@ -60,6 +60,16 @@
     </div>
 
     <div class="panel">
+      <h2>Teams</h2>
+      <div id="teams-list"><p style="color:#6e7681;font-size:12px;">No teams yet.</p></div>
+    </div>
+
+    <div class="panel">
+      <h2>Tasks</h2>
+      <div id="tasks-list"><p style="color:#6e7681;font-size:12px;">No tasks yet.</p></div>
+    </div>
+
+    <div class="panel">
       <h2>Assign Task</h2>
       <select id="zone-select"></select>
       <select id="team-select"></select>
@@ -73,6 +83,14 @@
       <h2>Create Team (demo)</h2>
       <input id="new-team-name" placeholder="Team name e.g. Alpha Squad" />
       <button onclick="createTeam()" class="secondary" style="width:100%;">Create Team</button>
+    </div>
+
+    <div class="panel">
+      <h2>Operational Report</h2>
+      <div style="display:flex;gap:6px;">
+        <button onclick="downloadReport('summary')" class="secondary" style="flex:1;">Download JSON</button>
+        <button onclick="downloadReport('summary.csv')" class="secondary" style="flex:1;">Download CSV</button>
+      </div>
     </div>
   </div>
 </div>
@@ -91,6 +109,11 @@ function saveApiUrl() {
 const map = L.map('map').setView([19.0760, 72.8777], 13); // default Mumbai-ish view
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
 
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+let teamNames = {};
+let lastSnapshot = '';
 let zoneMarkers = {};
 let teamMarkers = {};
 let mapHasBeenFitOnce = false;
@@ -104,16 +127,22 @@ function colorForScore(score) {
 
 async function refreshAll() {
   try {
-    const [zones, alerts, teams] = await Promise.all([
+    const [zones, alerts, teams, tasks] = await Promise.all([
       fetch(`${API}/evidence/zones`).then(r => r.json()),
       fetch(`${API}/alerts/`).then(r => r.json()),
       fetch(`${API}/teams/`).then(r => r.json()),
+      fetch(`${API}/tasks/`).then(r => r.json()),
     ]);
+    if (![zones, alerts, teams, tasks].every(Array.isArray)) throw new Error('bad response');
     document.getElementById('conn-status').textContent = '● live';
     document.getElementById('conn-status').style.color = '#7ee787';
+    const snap = JSON.stringify([zones, alerts, teams, tasks]);
+    if (snap === lastSnapshot) return;
+    lastSnapshot = snap;
     renderZones(zones);
     renderAlerts(alerts);
     renderTeams(teams);
+    renderTasks(tasks);
     populateSelects(zones, teams);
   } catch (e) {
     document.getElementById('conn-status').textContent = '● backend not reachable';
@@ -194,13 +223,64 @@ function renderAlerts(alerts) {
   });
 }
 
+function renderTasks(tasks) {
+  const list = document.getElementById('tasks-list');
+  list.innerHTML = tasks.length ? '' : '<p style="color:#6e7681;font-size:12px;">No tasks yet.</p>';
+  tasks.forEach(t => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const done = t.status === 'Completed';
+    const badge = done ? 'searched' : 'assigned';
+    let actions = '';
+    if (t.status === 'Assigned') actions += `<button class="secondary" onclick="setTaskStatus('${t.id}','InProgress')">Start</button> `;
+    if (!done) actions += `<button onclick="setTaskStatus('${t.id}','Completed')">Complete</button>`;
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span>Zone <code>${esc(t.zone_id)}</code></span>
+        <span class="badge ${badge}">${esc(t.status)}</span>
+      </div>
+      <div style="margin:4px 0 6px;color:#8b98a5;">${esc(teamNames[t.team_id] || 'Unknown team')} · ${esc(t.priority)} priority</div>
+      ${actions}
+    `;
+    list.appendChild(card);
+  });
+}
+
+async function setTaskStatus(id, status) {
+  await fetch(`${API}/tasks/${id}/status`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status })
+  });
+  refreshAll();
+}
+
+async function downloadReport(kind) {
+  const res = await fetch(`${API}/reports/${kind}`);
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = kind === 'summary' ? 'rescue_operation_report.json' : 'rescue_operation_report.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 function renderTeams(teams) {
+  teamNames = {};
+  const tl = document.getElementById('teams-list');
+  tl.innerHTML = teams.length ? '' : '<p style="color:#6e7681;font-size:12px;">No teams yet.</p>';
+  teams.forEach(t => {
+    teamNames[t.id] = t.team_name;
+    const c = document.createElement('div');
+    c.className = 'card';
+    c.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;"><span>${esc(t.team_name)}</span><span class="badge ${t.status === 'Assigned' ? 'assigned' : 'searched'}">${esc(t.status)}</span></div>`;
+    tl.appendChild(c);
+  });
   teams.forEach(t => {
     if (t.current_lat && t.current_lng) {
       if (teamMarkers[t.id]) {
         teamMarkers[t.id].setLatLng([t.current_lat, t.current_lng]);
       } else {
-        teamMarkers[t.id] = L.marker([t.current_lat, t.current_lng]).addTo(map).bindPopup(t.team_name);
+        teamMarkers[t.id] = L.marker([t.current_lat, t.current_lng]).addTo(map).bindPopup(esc(t.team_name));
       }
     }
   });
@@ -209,8 +289,11 @@ function renderTeams(teams) {
 function populateSelects(zones, teams) {
   const zoneSel = document.getElementById('zone-select');
   const teamSel = document.getElementById('team-select');
-  zoneSel.innerHTML = zones.map(z => `<option value="${z.id}">Zone ${z.id} (${z.confidence_score}%)</option>`).join('');
-  teamSel.innerHTML = teams.map(t => `<option value="${t.id}">${t.team_name}</option>`).join('');
+  const zv = zoneSel.value, tv = teamSel.value;
+  zoneSel.innerHTML = zones.map(z => `<option value="${esc(z.id)}">Zone ${esc(z.id)} (${z.confidence_score}%)</option>`).join('');
+  teamSel.innerHTML = teams.map(t => `<option value="${esc(t.id)}">${esc(t.team_name)}</option>`).join('');
+  if (zv && [...zoneSel.options].some(o => o.value === zv)) zoneSel.value = zv;
+  if (tv && [...teamSel.options].some(o => o.value === tv)) teamSel.value = tv;
 }
 
 async function assignTask() {
@@ -224,7 +307,7 @@ async function assignTask() {
     body: JSON.stringify({ zone_id, team_id, priority })
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({ detail: 'server error' }));
     alert('Could not assign: ' + err.detail);
   }
   refreshAll();

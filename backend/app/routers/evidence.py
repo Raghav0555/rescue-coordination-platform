@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db import models
 from app import schemas
-from app.services.fusion_engine import fuse_evidence
+from app.services.fusion_engine import fuse_evidence, EVIDENCE_WEIGHTS
 from app.services.alert_service import check_and_generate_alert
 
 router = APIRouter(prefix="/api/evidence", tags=["evidence"])
@@ -21,6 +21,9 @@ def submit_evidence(payload: schemas.EvidenceCreate, db: Session = Depends(get_d
     # FR-2.4: basic plausibility validation
     if not (-90 <= payload.lat <= 90) or not (-180 <= payload.lng <= 180):
         raise HTTPException(status_code=400, detail="Invalid coordinates")
+
+    if payload.type not in EVIDENCE_WEIGHTS:
+        raise HTTPException(status_code=400, detail="Invalid evidence type")
 
     evidence = models.Evidence(
         type=payload.type,

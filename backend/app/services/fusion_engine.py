@@ -112,9 +112,9 @@ def get_device_health_factor(db: Session, device_id: str | None) -> float:
 
     factor = 1.0
     battery = max(0, min(100, device.battery_level))  # clamp bad sensor readings
-    if device.battery_level < 20:
+    if battery < 20:
         factor *= 0.6  # low battery: sensor readings less reliable
-    elif device.battery_level < 40:
+    elif battery < 40:
         factor *= 0.85
 
     days_since_calibration = (datetime.datetime.utcnow() - device.last_calibration).days

@@ -15,7 +15,7 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Rescue Evidence Fusion & Coordination Platform (Prototype)",
-    description="Prototype backend implementing the High-priority FRs from Sprint 1.",
+    description="Prototype backend implementing the Sprint 1 and Sprint 2 requirements.",
     version="0.1.0",
 )
 
@@ -33,6 +33,7 @@ app.include_router(teams.router)
 app.include_router(tasks.router)
 app.include_router(alerts.router)
 app.include_router(devices.router)
+app.include_router(reports.router)
 
 
 @app.get("/")

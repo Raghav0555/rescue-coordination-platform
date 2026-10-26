@@ -17,6 +17,10 @@ def assign_task(payload: schemas.TaskCreate, db: Session = Depends(get_db)):
     if not zone:
         raise HTTPException(status_code=404, detail="Zone not found")
 
+    team = db.query(models.Team).filter(models.Team.id == payload.team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
     # FR-4.4: block if this zone already has an active task
     active = (
         db.query(models.Task)
@@ -36,6 +40,7 @@ def assign_task(payload: schemas.TaskCreate, db: Session = Depends(get_db)):
         status=models.TaskStatus.ASSIGNED,
     )
     zone.status = models.ZoneStatus.ASSIGNED
+    team.status = "Assigned"
     db.add(task)
     db.commit()
     db.refresh(task)
@@ -53,8 +58,15 @@ def update_task_status(task_id: str, payload: schemas.TaskStatusUpdate, db: Sess
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
+    valid = [s.value for s in models.TaskStatus]
+    if payload.status not in valid:
+        raise HTTPException(status_code=400, detail=f"Status must be one of {valid}")
+
     task.status = payload.status
     if payload.status == "Completed":
+        team = db.query(models.Team).filter(models.Team.id == task.team_id).first()
+        if team:
+            team.status = "Available"
         # UC-8: mark zone searched, freeing it up / closing the loop
         zone = db.query(models.SurvivorZone).filter(models.SurvivorZone.id == task.zone_id).first()
         if zone:

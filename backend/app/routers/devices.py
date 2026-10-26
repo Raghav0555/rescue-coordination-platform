@@ -4,7 +4,7 @@ FR-9-equivalent health tracking. A device "registers" itself (or gets
 upserted) whenever its health is reported, so the Fusion Engine has
 something to look up when scoring evidence from it.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import datetime
 
@@ -35,6 +35,8 @@ class DeviceOut(BaseModel):
 @router.post("/health", response_model=DeviceOut)
 def report_device_health(payload: DeviceHealthUpdate, db: Session = Depends(get_db)):
     """Upsert: creates the device record on first report, updates it after."""
+    if not 0 <= payload.battery_level <= 100:
+        raise HTTPException(status_code=400, detail="Battery level must be between 0 and 100")
     device = db.query(models.Device).filter(models.Device.id == payload.id).first()
     if not device:
         device = models.Device(id=payload.id, type=payload.type, battery_level=payload.battery_level)

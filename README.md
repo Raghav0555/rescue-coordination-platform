@@ -1,9 +1,11 @@
 # Rescue Evidence Fusion & Coordination Platform — Prototype
 
-This is a working Sprint 1 prototype covering the High-priority functional
+**Quick start (Windows):** double-click `START_DEMO.bat`. It installs the requirements, starts the backend on port 8000 and the frontend on port 5500, and opens the dashboard and the field app.
+
+This is a working Sprint 1 and Sprint 2 prototype covering the High-priority functional
 requirements from the SRS: authentication, evidence submission, evidence
 fusion & confidence scoring, task assignment (with duplicate prevention),
-and automatic alert generation.
+and automatic alert generation. Sprint 2 adds device-health weighting, alert acknowledgement, task status updates from the dashboard, and JSON/CSV operational reports.
 
 It's built to actually run end-to-end on your laptop, not just as boilerplate.
 
